@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 import argparse
 from rank_bm25 import BM25Okapi
 from openai import OpenAI
-from transformers import AutoModel, AutoTokenizer
+from transformers import AutoConfig, AutoModel, AutoTokenizer
 from sklearn.preprocessing import normalize
 from src.retrieval.eval_utils import evaluate_retrieval, evaluate_retrieval_turn2session
 from src.retrieval.index_expansion_utils import fetch_expansion_from_cache, resolve_expansion
@@ -64,6 +64,16 @@ def get_outfile_prefix(args):
     return outfile_prefix
 
 
+def load_legacy_qwen_config(model_name):
+    config = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
+    if not hasattr(config, 'rope_theta'):
+        rope_parameters = getattr(config, 'rope_parameters', None)
+        if not isinstance(rope_parameters, dict) or 'rope_theta' not in rope_parameters:
+            raise ValueError('Model configuration has no rotary embedding base')
+        config.rope_theta = rope_parameters['rope_theta']
+    return config
+
+
 class DenseRetrievalMaster:
     def __init__(self, args, gpu_id):
         self.args = args
@@ -83,13 +93,15 @@ class DenseRetrievalMaster:
             model_dir = self.args.cache_dir + "/dunzhang_stella_en_1.5B_v5"
             vector_dim = 1024
             vector_linear_directory = f"2_Dense_{vector_dim}"
-            model = AutoModel.from_pretrained(model_dir, trust_remote_code=True).to(self.device)
+            config = load_legacy_qwen_config(model_dir)
+            model = AutoModel.from_pretrained(model_dir, config=config, trust_remote_code=True).to(self.device)
             model.eval()
             tokenizer = AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True)
             vector_linear = torch.nn.Linear(in_features=model.config.hidden_size, out_features=vector_dim).to(self.device)
             vector_linear_dict = {
                 k.replace("linear.", ""): v for k, v in
-                torch.load(os.path.join(model_dir, f"{vector_linear_directory}/pytorch_model.bin")).items()
+                torch.load(os.path.join(model_dir, f"{vector_linear_directory}/pytorch_model.bin"),
+                           map_location='cpu', weights_only=True).items()
             }
             vector_linear.load_state_dict(vector_linear_dict)
             vector_linear.to(self.device)
@@ -97,7 +109,8 @@ class DenseRetrievalMaster:
             
         elif self.args.retriever == 'flat-gte':
             tokenizer = AutoTokenizer.from_pretrained('Alibaba-NLP/gte-Qwen2-7B-instruct', trust_remote_code=True)
-            model = AutoModel.from_pretrained('Alibaba-NLP/gte-Qwen2-7B-instruct', trust_remote_code=True).to(self.device)
+            config = load_legacy_qwen_config('Alibaba-NLP/gte-Qwen2-7B-instruct')
+            model = AutoModel.from_pretrained('Alibaba-NLP/gte-Qwen2-7B-instruct', config=config, trust_remote_code=True).to(self.device)
             model.eval()
             self.retriever_model = (tokenizer, model)
 
