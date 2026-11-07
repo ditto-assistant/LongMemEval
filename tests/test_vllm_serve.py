@@ -37,6 +37,9 @@ class VllmServeTest(unittest.TestCase):
                 result, argv = self.run_script(name, args)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(argv[argv.index("--host") + 1], "127.0.0.1")
+                result, argv = self.run_script(name, args, host="localhost")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(argv[argv.index("--host") + 1], "127.0.0.1")
                 result, argv = self.run_script(name, args, host="0.0.0.0")
                 self.assertEqual(result.returncode, 2)
                 self.assertEqual(argv, [])
@@ -44,6 +47,22 @@ class VllmServeTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(argv[argv.index("--host") + 1], "0.0.0.0")
                 self.assertNotIn("synthetic", argv)
+
+    def test_numeric_arguments_cannot_inject_a_second_host(self):
+        for name, args in SCRIPTS:
+            with self.subTest(script=name, field="port"):
+                result, argv = self.run_script(name, args + ["8001 --host 0.0.0.0"])
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(argv, [])
+            with self.subTest(script=name, field="parallelism"):
+                result, argv = self.run_script(name, args + ["8001", "1 --host 0.0.0.0"])
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(argv, [])
+        result, argv = self.run_script(
+            "serve_vllm_with_maxlen.sh", ["0", "llama-3-8b-instruct", "2048 --host 0.0.0.0"]
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(argv, [])
 
 
 if __name__ == "__main__":
