@@ -15,7 +15,7 @@ positive_integer() {
 }
 if ! positive_integer "$PORT" || [ "${#PORT}" -gt 5 ] || [ "$PORT" -gt 65535 ] || ! positive_integer "$TP_SIZE"; then
     echo "PORT must be 1-65535 and TP_SIZE must be a positive integer." >&2
-    exit 2
+    return 2 2>/dev/null || exit 2
 fi
 
 case "$HOST" in
@@ -23,7 +23,7 @@ case "$HOST" in
     127.0.0.1|::1) ;;
     *) if [ -z "${VLLM_API_KEY:-}" ]; then
         echo "A non-loopback VLLM_HOST requires VLLM_API_KEY and network access controls." >&2
-        exit 2
+        return 2 2>/dev/null || exit 2
     fi ;;
 esac
 

@@ -1,3 +1,4 @@
+import functools
 import hashlib
 import inspect
 from types import SimpleNamespace
@@ -128,6 +129,15 @@ class RetrievalCompatibilityTest(unittest.TestCase):
         with patch.object(run_retrieval, "LEGACY_QWEN_ROTARY_SHA256", fixture_hash), \
              patch.object(run_retrieval, "LEGACY_QWEN_METHOD_SHA256", methods):
             run_retrieval.restore_legacy_rotary_buffers(model, 3)
+            original = Qwen2RotaryEmbedding.forward
+
+            @functools.wraps(original)
+            def wrapped(*args, **kwargs):
+                return original(*args, **kwargs)
+
+            with patch.object(Qwen2RotaryEmbedding, "forward", wrapped):
+                with self.assertRaisesRegex(ValueError, "unsupported rotary implementation"):
+                    run_retrieval.restore_legacy_rotary_buffers(model, 3)
             model.rotary.forward = lambda length: None
             with self.assertRaisesRegex(ValueError, "unsupported rotary implementation"):
                 run_retrieval.restore_legacy_rotary_buffers(model, 3)

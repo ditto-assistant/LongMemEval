@@ -105,9 +105,12 @@ def restore_legacy_rotary_buffers(model, cache_length):
             raise ValueError('unsupported nonpersistent model buffers')
         try:
             source_hash = hashlib.sha256(inspect.getsource(type(module)).encode('utf-8')).hexdigest()
+            methods = {name: getattr(type(module), name) for name in LEGACY_QWEN_METHOD_SHA256}
+            if any(hasattr(method, '__wrapped__') for method in methods.values()):
+                raise ValueError('unsupported rotary implementation')
             method_hashes = {
-                name: hashlib.sha256(inspect.getsource(getattr(type(module), name)).encode('utf-8')).hexdigest()
-                for name in LEGACY_QWEN_METHOD_SHA256
+                name: hashlib.sha256(inspect.getsource(method).encode('utf-8')).hexdigest()
+                for name, method in methods.items()
             }
         except (AttributeError, OSError, TypeError) as exc:
             raise ValueError('unsupported rotary implementation') from exc

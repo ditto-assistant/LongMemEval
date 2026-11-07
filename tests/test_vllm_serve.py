@@ -83,6 +83,18 @@ class VllmServeTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual((tmp / "key-present").read_text(), "yes")
 
+    def test_sourced_guard_returns_without_terminating_the_shell(self):
+        for name, args in SCRIPTS:
+            with self.subTest(script=name):
+                result = subprocess.run(
+                    ["bash", "-c", 'source "$@"; code=$?; printf "survived:%s" "$code"',
+                     "test", str(ROOT / "src" / "utils" / name), *args],
+                    cwd=ROOT / "src" / "utils", env={"PATH": os.defpath, "VLLM_HOST": "0.0.0.0"},
+                    text=True, capture_output=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, "survived:2")
+
 
 if __name__ == "__main__":
     unittest.main()
