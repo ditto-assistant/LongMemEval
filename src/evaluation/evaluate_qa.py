@@ -4,7 +4,7 @@ import json
 from tqdm import tqdm
 import backoff
 import openai
-from openai import OpenAI
+from openai import DefaultHttpxClient, OpenAI
 import numpy as np
 
 
@@ -64,12 +64,16 @@ if __name__ == '__main__':
         openai_api_key = os.getenv('OPENAI_API_KEY')
         openai_api_base = None
     else:
-        openai_api_key = "EMPTY"
-        openai_api_base = "http://localhost:8001/v1"
+        openai_api_key = os.environ.get("VLLM_API_KEY") or "EMPTY"
+        openai_api_base = "http://[::1]:8001/v1" if os.environ.get("VLLM_HOST") == "::1" else "http://127.0.0.1:8001/v1"
     
+    local_client_options = {} if metric_model_source == 'openai' else {
+        'http_client': DefaultHttpxClient(trust_env=False, follow_redirects=False),
+    }
     metric_client = OpenAI(
         api_key=openai_api_key,
         base_url=openai_api_base,
+        **local_client_options,
     )
 
     try:

@@ -1,8 +1,11 @@
 import sys
+import os
+import ipaddress
 import json
+from urllib.parse import urlsplit
 from tqdm import tqdm
 import openai
-from openai import OpenAI
+from openai import DefaultHttpxClient, OpenAI
 import backoff
 import random
 import numpy as np
@@ -21,7 +24,8 @@ def parse_args():
     parser.add_argument('--model_name', type=str, required=True)
     parser.add_argument('--model_alias', type=str, required=True)
     parser.add_argument('--openai_base_url', type=str, default=None)
-    parser.add_argument('--openai_key', type=str, required=True)
+    parser.add_argument('--openai_key', type=str, default=None)
+    parser.add_argument('--local_vllm', action='store_true')
     parser.add_argument('--openai_organization', type=str, default=None)
 
     parser.add_argument('--retriever_type', type=str, required=True)
@@ -36,7 +40,13 @@ def parse_args():
 
     parser.add_argument('--gen_length', type=int, default=None)
     
-    return parser.parse_args()
+    args = parser.parse_args()
+    if not args.openai_key:
+        if args.local_vllm:
+            args.openai_key = 'EMPTY'
+        else:
+            parser.error('--openai_key is required unless --local_vllm is set')
+    return args
 
 
 def check_args(args):
@@ -288,13 +298,31 @@ def chat_completions_with_backoff(client, **kwargs):
     return client.chat.completions.create(**kwargs)
 
 
+def select_api_key(args):
+    if not getattr(args, 'local_vllm', False):
+        return args.openai_key
+    try:
+        url = urlsplit(args.openai_base_url or '')
+        host = url.hostname
+        if (url.scheme not in ('http', 'https') or not host or '%' in host or
+                url.username is not None or url.password is not None or
+                not ipaddress.ip_address(host).is_loopback):
+            raise ValueError('not a numeric loopback URL')
+        _ = url.port
+    except ValueError as exc:
+        raise ValueError('--local_vllm requires a numeric loopback URL') from exc
+    return os.environ.get('VLLM_API_KEY') or args.openai_key
+
+
 def main(args):
     # setup
     if args.openai_organization:
         openai.organization = args.openai_organization
+    local_client_options = {'http_client': DefaultHttpxClient(trust_env=False, follow_redirects=False)} if getattr(args, 'local_vllm', False) else {}
     client = OpenAI(
-        api_key=args.openai_key,
+        api_key=select_api_key(args),
         base_url=args.openai_base_url,
+        **local_client_options,
     )
 
     try:
