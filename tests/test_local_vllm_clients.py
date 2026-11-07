@@ -1,11 +1,14 @@
 """Regression tests for local vLLM credentials and HTTP transport."""
 
 import contextlib
+import ast
 import http.server
 import io
 import json
 import os
 import runpy
+import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -48,6 +51,47 @@ def server(response=200, location=None):
 
 
 class LocalClientsTest(unittest.TestCase):
+    def test_retrieval_client_construction(self):
+        source = (ROOT / "src/retrieval/run_retrieval.py").read_text()
+        tree = ast.parse(source)
+        assignment = next(node for node in tree.body if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "client" for t in node.targets))
+        code = compile(ast.Module(body=[assignment], type_ignores=[]), "run_retrieval.py", "exec")
+        for host, expected in (("127.0.0.1", "127.0.0.1"), ("::1", "[::1]")):
+            calls = []
+            def capture(**kwargs):
+                calls.append(kwargs)
+            with patch.dict(os.environ, {"VLLM_HOST": host, "VLLM_API_KEY": SYNTHETIC_KEY}):
+                exec(code, {"os": os, "OpenAI": capture, "DefaultHttpxClient": openai.DefaultHttpxClient})
+            self.assertEqual(calls[0]["api_key"], SYNTHETIC_KEY)
+            self.assertIn(expected, calls[0]["base_url"])
+            self.assertFalse(calls[0]["http_client"].trust_env)
+            self.assertFalse(calls[0]["http_client"].follow_redirects)
+            calls[0]["http_client"].close()
+
+    def test_wrapper_does_not_put_environment_key_in_arguments(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            script_dir = root / "src/generation"
+            script_dir.mkdir(parents=True)
+            shutil.copy(ROOT / "src/generation/run_generation.sh", script_dir)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            fake_python = bin_dir / "python"
+            fake_python.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$CAPTURE_ARGS"\n')
+            fake_python.chmod(0o755)
+            for host, expected in (("127.0.0.1", "http://127.0.0.1:8001/v1"), ("::1", "http://[::1]:8001/v1")):
+                capture = root / "args"
+                env = dict(os.environ, PATH=str(bin_dir) + os.pathsep + os.environ['PATH'], CAPTURE_ARGS=str(capture), VLLM_HOST=host, VLLM_API_KEY=SYNTHETIC_KEY)
+                subprocess.run(['bash', 'run_generation.sh', 'input.json', 'llama-3.1-8b-instruct', 'no-retrieval'], cwd=script_dir, env=env, check=True, capture_output=True)
+                args = capture.read_text().splitlines()
+                self.assertIn('--local_vllm', args)
+                self.assertIn(expected, args)
+                self.assertNotIn(SYNTHETIC_KEY, args)
+            subprocess.run(['bash', 'run_generation.sh', 'input.json', 'gpt-4o', 'no-retrieval'], cwd=script_dir, env=env, check=True, capture_output=True)
+            args = capture.read_text().splitlines()
+            self.assertNotIn('--local_vllm', args)
+            self.assertNotIn(SYNTHETIC_KEY, args)
+
     def test_expansion_clients_use_local_key_and_safe_transport(self):
         paths = sorted((ROOT / "src/index_expansion").glob("batch_expansion_*.py"))
         self.assertEqual(len(paths), 6)
