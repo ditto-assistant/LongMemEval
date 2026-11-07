@@ -90,6 +90,10 @@ use `VLLM_API_KEY` for their local vLLM connections when it is set; without a
 key they retain the existing local placeholder. The generation CLI selects
 that environment key only with `--local_vllm` and a numeric loopback base URL;
 hosted OpenAI credentials remain separate.
+Local vLLM clients use IPv4 loopback by default and IPv6 loopback when
+`VLLM_HOST=::1`. They do not use environment-configured proxies or CA bundles,
+and they do not follow redirects; hosted OpenAI clients keep their existing
+transport settings.
 
 ## 📜 Dataset Format
 

@@ -1,7 +1,7 @@
 import os
 import json
 from tqdm import tqdm
-from openai import OpenAI
+from openai import DefaultHttpxClient, OpenAI
 import openai
 import backoff
 
@@ -13,7 +13,8 @@ def chat_completions_with_backoff(client, **kwargs):
 
 client = OpenAI(
     api_key=os.environ.get("VLLM_API_KEY") or "empty",
-    base_url="http://127.0.0.1:8001/v1",
+    base_url="http://[::1]:8001/v1" if os.environ.get("VLLM_HOST") == "::1" else "http://127.0.0.1:8001/v1",
+    http_client=DefaultHttpxClient(trust_env=False, follow_redirects=False),
 )
 
 
