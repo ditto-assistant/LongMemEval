@@ -52,10 +52,14 @@ We recommend using a conda environment for the project. You may follow the steps
 If you only need to calculate the metrics on the outputs produced by your own system, you can install this minimal requirement set which allows you to run `src/evaluation/evaluate_qa.py`.
 
 ```
-conda create -n longmemeval-lite python=3.9
+conda create -n longmemeval-lite python=3.12
 conda activate longmemeval-lite
 pip install -r requirements-lite.txt
 ```
+
+The lightweight environment is tested with Python 3.12. Its pinned AnyIO requires Python 3.10 or later, while the pinned NumPy release limits compatibility with newer Python versions. To check its HTTP client and TLS hostname handling without model inference, run `python tests/test_lite_http_client.py` and `python tests/test_lite_tls.py` in an isolated environment. These tests use ephemeral loopback services; the TLS check requires `openssl`.
+
+For a local-model judge, `LONGMEMEVAL_LOCAL_BASE_URL` optionally selects its OpenAI-compatible endpoint. If unset, the evaluator continues to use `http://localhost:8001/v1`.
 
 #### Full support
 
