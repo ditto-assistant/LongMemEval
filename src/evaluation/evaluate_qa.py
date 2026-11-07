@@ -64,8 +64,8 @@ if __name__ == '__main__':
         openai_api_key = os.getenv('OPENAI_API_KEY')
         openai_api_base = None
     else:
-        openai_api_key = "EMPTY"
-        openai_api_base = "http://localhost:8001/v1"
+        openai_api_key = os.environ.get("VLLM_API_KEY") or "EMPTY"
+        openai_api_base = "http://127.0.0.1:8001/v1"
     
     metric_client = OpenAI(
         api_key=openai_api_key,

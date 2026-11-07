@@ -12,8 +12,8 @@ def chat_completions_with_backoff(client, **kwargs):
 
 
 client = OpenAI(
-    api_key="empty",
-    base_url="http://localhost:8001/v1",
+    api_key=os.environ.get("VLLM_API_KEY") or "empty",
+    base_url="http://127.0.0.1:8001/v1",
 )
 
 

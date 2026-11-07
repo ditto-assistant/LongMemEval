@@ -86,7 +86,10 @@ The vLLM helper scripts bind to `127.0.0.1` by default. Setting `VLLM_HOST` to
 a non-loopback address also requires `VLLM_API_KEY`; configure clients with
 the same key. vLLM's API key does not protect every endpoint, so remote access
 also requires network-level access controls. The included benchmark clients
-use a local, unauthenticated API and need configuration changes to use a key.
+use `VLLM_API_KEY` for their local vLLM connections when it is set; without a
+key they retain the existing local placeholder. The generation CLI selects
+that environment key only with `--local_vllm` and a numeric loopback base URL;
+hosted OpenAI credentials remain separate.
 
 ## 📜 Dataset Format
 

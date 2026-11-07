@@ -35,11 +35,13 @@ if [[ $model_alias == "gpt-4o" || $model_alias == "gpt-4o-mini" ]]; then
     openai_base_url_flag=""
     openai_key="YOUR_API_KEY"
     openai_org_flag="--openai_organization YOUR_ORGANIZATION"   # uclanlp
+    local_vllm_flag=""
 else
     # will call an openai server emulator served by e.g., vllm locally
-    openai_base_url_flag="--openai_base_url http://localhost:8001/v1"
+    openai_base_url_flag="--openai_base_url http://127.0.0.1:8001/v1"
     openai_key="EMPTY"
     openai_org_flag=""
+    local_vllm_flag="--local_vllm"
 fi
 
 retriever_type=""
@@ -80,7 +82,7 @@ python run_generation.py \
        --model_name ${model} --model_alias ${model_alias} \
        --retriever_type ${retriever_type} \
        --merge_key_expansion_into_value ${merge_key_expansion_into_value} \
-       --openai_key ${openai_key} ${openai_org_flag} ${openai_base_url_flag}  \
+       --openai_key ${openai_key} ${openai_org_flag} ${openai_base_url_flag} ${local_vllm_flag} \
        --topk_context ${topk_context} \
        --history_format ${history_format} \
        --useronly ${useronly} \
