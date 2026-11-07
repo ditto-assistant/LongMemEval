@@ -15,6 +15,7 @@ class Handler(BaseHTTPRequestHandler):
         assert self.path == '/v1/chat/completions'
         data = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
         assert data['model'] in {'meta-llama/Meta-Llama-3.1-70B-Instruct', 'gpt-4o-2024-08-06'}
+        assert data['n'] == 1 and data['temperature'] == 0 and data['max_tokens'] == 10
         if data['model'] == 'gpt-4o-2024-08-06':
             assert self.headers['Authorization'] == 'Bearer synthetic-only'
         else:
