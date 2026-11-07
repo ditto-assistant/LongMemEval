@@ -64,6 +64,25 @@ class VllmServeTest(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertEqual(argv, [])
 
+    def test_sourced_script_passes_shell_local_key_to_server(self):
+        for name, args in SCRIPTS:
+            with self.subTest(script=name), tempfile.TemporaryDirectory() as temporary:
+                tmp = Path(temporary)
+                shim = tmp / "python"
+                shim.write_text('#!/bin/sh\n[ -n "${VLLM_API_KEY:-}" ] && printf yes > "$CAPTURE"\n')
+                shim.chmod(0o755)
+                env = {
+                    "PATH": str(tmp) + os.pathsep + os.defpath,
+                    "CAPTURE": str(tmp / "key-present"),
+                    "VLLM_HOST": "0.0.0.0",
+                }
+                result = subprocess.run(
+                    ["bash", "-c", 'VLLM_API_KEY=synthetic; source "$@"', "test", str(ROOT / "src" / "utils" / name), *args],
+                    cwd=ROOT / "src" / "utils", env=env, text=True, capture_output=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual((tmp / "key-present").read_text(), "yes")
+
 
 if __name__ == "__main__":
     unittest.main()

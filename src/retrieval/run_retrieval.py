@@ -78,6 +78,10 @@ def load_legacy_qwen_config(model_name):
 
 
 LEGACY_QWEN_ROTARY_SHA256 = '85e083350498af430ef887489b5429fbaf3c8fe10fa7d0aa10541e1aafaf81fe'
+LEGACY_QWEN_METHOD_SHA256 = {
+    '_set_cos_sin_cache': '04b15e4dfae51d556a5a35a1ac8c37e9a26d2d1a511348079cd84e2a0f8b7d37',
+    'forward': 'a68fa1629dadbbc01b79166c019f29cd8439a318c16bb71548aea5cb2e5bd209',
+}
 
 
 def restore_legacy_rotary_buffers(model, cache_length):
@@ -90,7 +94,7 @@ def restore_legacy_rotary_buffers(model, cache_length):
     if not isinstance(cache_length, int) or cache_length <= 0:
         raise ValueError('invalid rotary cache length')
     parameters = list(model.parameters())
-    if not parameters or any(p.device.type != 'cpu' or (p.is_floating_point() and p.dtype != torch.float32) for p in parameters):
+    if not parameters or any(p.device.type != 'cpu' or p.dtype != torch.float32 for p in parameters):
         raise ValueError('unsupported rotary model dtype')
     rotary_modules = []
     for module in model.modules():
@@ -101,9 +105,14 @@ def restore_legacy_rotary_buffers(model, cache_length):
             raise ValueError('unsupported nonpersistent model buffers')
         try:
             source_hash = hashlib.sha256(inspect.getsource(type(module)).encode('utf-8')).hexdigest()
-        except (OSError, TypeError) as exc:
+            method_hashes = {
+                name: hashlib.sha256(inspect.getsource(getattr(type(module), name)).encode('utf-8')).hexdigest()
+                for name in LEGACY_QWEN_METHOD_SHA256
+            }
+        except (AttributeError, OSError, TypeError) as exc:
             raise ValueError('unsupported rotary implementation') from exc
-        if source_hash != LEGACY_QWEN_ROTARY_SHA256:
+        if (source_hash != LEGACY_QWEN_ROTARY_SHA256 or method_hashes != LEGACY_QWEN_METHOD_SHA256 or
+                any(name in module.__dict__ for name in LEGACY_QWEN_METHOD_SHA256)):
             raise ValueError('unsupported rotary implementation')
         dim = module.dim
         base = module.base

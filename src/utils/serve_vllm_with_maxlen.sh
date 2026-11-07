@@ -46,7 +46,7 @@ MODEL_ZOO["phi-3.5-mini-instruct"]="microsoft/Phi-3.5-mini-instruct"
 MODEL_ZOO["phi-4"]="microsoft/phi-4"
 model_name=${MODEL_ZOO["$MODEL"]}
 
-python -m vllm.entrypoints.openai.api_server \
+VLLM_API_KEY="${VLLM_API_KEY:-}" python -m vllm.entrypoints.openai.api_server \
        --host "${HOST}" \
        --model "${model_name}" \
        --max-model-len "${MAXLEN}" \

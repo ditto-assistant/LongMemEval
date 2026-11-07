@@ -121,8 +121,17 @@ class RetrievalCompatibilityTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unsupported rotary implementation"):
             run_retrieval.restore_legacy_rotary_buffers(model, 3)
         fixture_hash = hashlib.sha256(inspect.getsource(Qwen2RotaryEmbedding).encode()).hexdigest()
-        with patch.object(run_retrieval, "LEGACY_QWEN_ROTARY_SHA256", fixture_hash):
+        methods = {
+            name: hashlib.sha256(inspect.getsource(getattr(Qwen2RotaryEmbedding, name)).encode()).hexdigest()
+            for name in ("_set_cos_sin_cache", "forward")
+        }
+        with patch.object(run_retrieval, "LEGACY_QWEN_ROTARY_SHA256", fixture_hash), \
+             patch.object(run_retrieval, "LEGACY_QWEN_METHOD_SHA256", methods):
             run_retrieval.restore_legacy_rotary_buffers(model, 3)
+            model.rotary.forward = lambda length: None
+            with self.assertRaisesRegex(ValueError, "unsupported rotary implementation"):
+                run_retrieval.restore_legacy_rotary_buffers(model, 3)
+            del model.rotary.forward
         expected = 1.0 / (1000000.0 ** (torch.arange(0, 8, 2).float() / 8))
         torch.testing.assert_close(model.rotary.inv_freq, expected)
         self.assertEqual(model.rotary.max_seq_len_cached, 3)
@@ -134,7 +143,8 @@ class RetrievalCompatibilityTest(unittest.TestCase):
         self.assertEqual(cos.shape, (5, 8))
 
         model.config.num_hidden_layers = 2
-        with patch.object(run_retrieval, "LEGACY_QWEN_ROTARY_SHA256", fixture_hash):
+        with patch.object(run_retrieval, "LEGACY_QWEN_ROTARY_SHA256", fixture_hash), \
+             patch.object(run_retrieval, "LEGACY_QWEN_METHOD_SHA256", methods):
             with self.assertRaisesRegex(ValueError, "layer count"):
                 run_retrieval.restore_legacy_rotary_buffers(model, 3)
         model.config.num_hidden_layers = 1
@@ -142,6 +152,10 @@ class RetrievalCompatibilityTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "dtype"):
             run_retrieval.restore_legacy_rotary_buffers(model, 3)
         model.weight.data = model.weight.data.float()
+        model.weight = torch.nn.Parameter(torch.zeros(1, dtype=torch.int8), requires_grad=False)
+        with self.assertRaisesRegex(ValueError, "dtype"):
+            run_retrieval.restore_legacy_rotary_buffers(model, 3)
+        model.weight = torch.nn.Parameter(torch.zeros(1))
 
         model.config.rope_parameters = {"rope_type": "linear", "rope_theta": 1000000.0}
         with self.assertRaisesRegex(ValueError, "unsupported rotary"):
