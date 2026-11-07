@@ -8,6 +8,15 @@ MODEL=$2
 MAXLEN=$3
 PORT=${4:-8001}
 TP_SIZE=${5:-1}
+HOST=${VLLM_HOST:-127.0.0.1}
+
+case "$HOST" in
+    127.0.0.1|::1|localhost) ;;
+    *) if [ -z "${VLLM_API_KEY:-}" ]; then
+        echo "A non-loopback VLLM_HOST requires VLLM_API_KEY and network access controls." >&2
+        exit 2
+    fi ;;
+esac
 
 export CUDA_VISIBLE_DEVICES=${GPU}
 
@@ -28,6 +37,7 @@ MODEL_ZOO["phi-4"]="microsoft/phi-4"
 model_name=${MODEL_ZOO["$MODEL"]}
 
 python -m vllm.entrypoints.openai.api_server \
+       --host "${HOST}" \
        --model ${model_name} \
        --max-model-len ${MAXLEN} \
        --tensor-parallel-size ${TP_SIZE} \

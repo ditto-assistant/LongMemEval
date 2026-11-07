@@ -78,6 +78,12 @@ compile` command recorded at the top of `requirements-full.txt`. The old
 `flash-attn` and `vllm-flash-attn` pins are not included in this candidate;
 model-specific attention support must be validated before relying on it.
 
+The vLLM helper scripts bind to `127.0.0.1` by default. Setting `VLLM_HOST` to
+a non-loopback address also requires `VLLM_API_KEY`; configure clients with
+the same key. vLLM's API key does not protect every endpoint, so remote access
+also requires network-level access controls. The included benchmark clients
+use a local, unauthenticated API and need configuration changes to use a key.
+
 ## 📜 Dataset Format
 
 Three files are included in the data package:

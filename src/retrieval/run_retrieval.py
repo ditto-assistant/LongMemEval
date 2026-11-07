@@ -142,7 +142,7 @@ class DenseRetrievalMaster:
                     input_data = tokenizer([query], padding="longest", truncation=True, max_length=512, return_tensors="pt")
                     input_data = {k: v.to(model.device) for k, v in input_data.items()}
                     attention_mask = input_data["attention_mask"]
-                    last_hidden_state = model(**input_data)[0]
+                    last_hidden_state = model(**input_data, use_cache=False)[0]
                     last_hidden = last_hidden_state.masked_fill(~attention_mask[..., None].bool(), 0.0)
                     query_vectors = last_hidden.sum(dim=1) / attention_mask.sum(dim=1)[..., None]
                     query_vectors = normalize(vector_linear(query_vectors).detach().cpu())
@@ -153,7 +153,7 @@ class DenseRetrievalMaster:
                         input_data = tokenizer(batch, padding="longest", truncation=True, max_length=512, return_tensors="pt")
                         input_data = {k: v.to(model.device) for k, v in input_data.items()}
                         attention_mask = input_data["attention_mask"]
-                        last_hidden_state = model(**input_data)[0]
+                        last_hidden_state = model(**input_data, use_cache=False)[0]
                         last_hidden = last_hidden_state.masked_fill(~attention_mask[..., None].bool(), 0.0)
                         docs_vectors = last_hidden.sum(dim=1) / attention_mask.sum(dim=1)[..., None]
                         docs_vectors = normalize(vector_linear(docs_vectors).detach().cpu())
@@ -182,7 +182,7 @@ class DenseRetrievalMaster:
                     for batch in dataloader:
                         batch_dict = tokenizer(batch, max_length=8192, padding=True, truncation=True, return_tensors='pt')
                         batch_dict = {k: v.to(model.device) for k, v in batch_dict.items()}
-                        outputs = model(**batch_dict)
+                        outputs = model(**batch_dict, use_cache=False)
                         embeddings = last_token_pool(outputs.last_hidden_state, batch_dict['attention_mask'])
                         all_vectors.append(embeddings)
                 all_vectors = torch.cat(all_vectors, dim=0)

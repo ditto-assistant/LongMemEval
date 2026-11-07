@@ -7,6 +7,15 @@ GPU=$1
 MODEL=$2
 PORT=${3:-8001}
 TP_SIZE=${4:-1}
+HOST=${VLLM_HOST:-127.0.0.1}
+
+case "$HOST" in
+    127.0.0.1|::1|localhost) ;;
+    *) if [ -z "${VLLM_API_KEY:-}" ]; then
+        echo "A non-loopback VLLM_HOST requires VLLM_API_KEY and network access controls." >&2
+        exit 2
+    fi ;;
+esac
 
 export CUDA_VISIBLE_DEVICES=${GPU}
 
@@ -27,6 +36,7 @@ MODEL_ZOO["phi-4"]="microsoft/phi-4"
 model_name=${MODEL_ZOO["$MODEL"]}
 
 python -m vllm.entrypoints.openai.api_server \
+       --host "${HOST}" \
        --model ${model_name} \
        --tensor-parallel-size ${TP_SIZE} \
        --download-dir "${HOME_DIR}/model_cache/" \
