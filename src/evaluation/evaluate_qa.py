@@ -65,7 +65,7 @@ if __name__ == '__main__':
         openai_api_base = None
     else:
         openai_api_key = "EMPTY"
-        openai_api_base = "http://localhost:8001/v1"
+        openai_api_base = os.getenv('LONGMEMEVAL_LOCAL_BASE_URL', 'http://localhost:8001/v1')
     
     metric_client = OpenAI(
         api_key=openai_api_key,
