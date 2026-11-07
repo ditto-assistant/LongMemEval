@@ -77,6 +77,10 @@ The resolved lock is generated from `requirements-full.in` with the `uv pip
 compile` command recorded at the top of `requirements-full.txt`. The old
 `flash-attn` and `vllm-flash-attn` pins are not included in this candidate;
 model-specific attention support must be validated before relying on it.
+The current Stella/GTE compatibility repair recognizes only the reviewed
+float32 custom Qwen rotary implementation; unrecognized local model revisions,
+scaled rotary configurations, and other dtypes fail rather than silently
+using uninitialized buffers. GPU and mixed-precision behavior remain untested.
 
 The vLLM helper scripts bind to `127.0.0.1` by default. Setting `VLLM_HOST` to
 a non-loopback address also requires `VLLM_API_KEY`; configure clients with

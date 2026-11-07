@@ -1,3 +1,5 @@
+import hashlib
+import inspect
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -47,6 +49,31 @@ class LoadableModel(CacheSensitiveModel):
         return self
 
 
+class Qwen2RotaryEmbedding(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.dim = 8
+        self.base = 1000000.0
+        self.max_position_embeddings = 128
+        self.max_seq_len_cached = 128
+        self.register_buffer("inv_freq", torch.full((4,), -1.0), persistent=False)
+        self.register_buffer("cos_cached", torch.full((128, 8), -1.0), persistent=False)
+        self.register_buffer("sin_cached", torch.full((128, 8), -1.0), persistent=False)
+
+    def _set_cos_sin_cache(self, seq_len, device, dtype):
+        self.max_seq_len_cached = seq_len
+        positions = torch.arange(seq_len, device=device, dtype=torch.int64).type_as(self.inv_freq)
+        frequencies = torch.outer(positions, self.inv_freq)
+        values = torch.cat((frequencies, frequencies), dim=-1)
+        self.register_buffer("cos_cached", values.cos().to(dtype), persistent=False)
+        self.register_buffer("sin_cached", values.sin().to(dtype), persistent=False)
+
+    def forward(self, length):
+        if length > self.max_seq_len_cached:
+            self._set_cos_sin_cache(length, self.inv_freq.device, torch.get_default_dtype())
+        return self.cos_cached[:length], self.sin_cached[:length]
+
+
 class RetrievalCompatibilityTest(unittest.TestCase):
     def test_legacy_rope_base_is_preserved(self):
         config = SimpleNamespace(rope_parameters={"rope_theta": 1000000.0})
@@ -73,12 +100,52 @@ class RetrievalCompatibilityTest(unittest.TestCase):
                 with patch.object(run_retrieval.AutoConfig, "from_pretrained", return_value=config), \
                      patch.object(run_retrieval.AutoTokenizer, "from_pretrained", return_value=FakeTokenizer()), \
                      patch.object(run_retrieval.AutoModel, "from_pretrained", return_value=LoadableModel()) as loader, \
+                     patch.object(run_retrieval, "restore_legacy_rotary_buffers") as restore, \
                      patch.object(torch, "load", return_value=state) as load:
                     master.prepare_retriever()
                 self.assertIs(loader.call_args.kwargs["config"], config)
                 self.assertEqual(config.rope_theta, 1000000.0)
+                restore.assert_called_once_with(loader.return_value, 513 if retriever == "flat-stella" else 8193)
                 if retriever == "flat-stella":
                     self.assertEqual(load.call_args.kwargs, {"map_location": "cpu", "weights_only": True})
+
+    def test_rotary_buffers_are_rebuilt_from_the_model_base(self):
+        model = torch.nn.Module()
+        model.config = SimpleNamespace(
+            rope_theta=1000000.0,
+            rope_parameters={"rope_type": "default", "rope_theta": 1000000.0},
+            num_hidden_layers=1,
+        )
+        model.weight = torch.nn.Parameter(torch.zeros(1))
+        model.rotary = Qwen2RotaryEmbedding()
+        with self.assertRaisesRegex(ValueError, "unsupported rotary implementation"):
+            run_retrieval.restore_legacy_rotary_buffers(model, 3)
+        fixture_hash = hashlib.sha256(inspect.getsource(Qwen2RotaryEmbedding).encode()).hexdigest()
+        with patch.object(run_retrieval, "LEGACY_QWEN_ROTARY_SHA256", fixture_hash):
+            run_retrieval.restore_legacy_rotary_buffers(model, 3)
+        expected = 1.0 / (1000000.0 ** (torch.arange(0, 8, 2).float() / 8))
+        torch.testing.assert_close(model.rotary.inv_freq, expected)
+        self.assertEqual(model.rotary.max_seq_len_cached, 3)
+        cos, sin = model.rotary(3)
+        torch.testing.assert_close(cos[0], torch.ones(8))
+        torch.testing.assert_close(sin[0], torch.zeros(8))
+        self.assertEqual(cos.shape, (3, 8))
+        cos, _ = model.rotary(5)
+        self.assertEqual(cos.shape, (5, 8))
+
+        model.config.num_hidden_layers = 2
+        with patch.object(run_retrieval, "LEGACY_QWEN_ROTARY_SHA256", fixture_hash):
+            with self.assertRaisesRegex(ValueError, "layer count"):
+                run_retrieval.restore_legacy_rotary_buffers(model, 3)
+        model.config.num_hidden_layers = 1
+        model.weight.data = model.weight.data.half()
+        with self.assertRaisesRegex(ValueError, "dtype"):
+            run_retrieval.restore_legacy_rotary_buffers(model, 3)
+        model.weight.data = model.weight.data.float()
+
+        model.config.rope_parameters = {"rope_type": "linear", "rope_theta": 1000000.0}
+        with self.assertRaisesRegex(ValueError, "unsupported rotary"):
+            run_retrieval.restore_legacy_rotary_buffers(model, 3)
 
     def test_stella_and_gte_retrieval_do_not_use_legacy_cache(self):
         for retriever in ("flat-stella", "flat-gte"):

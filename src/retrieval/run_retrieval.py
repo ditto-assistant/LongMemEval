@@ -2,6 +2,9 @@ import os
 import multiprocessing as mp
 from functools import partial
 import json
+import hashlib
+import inspect
+import math
 from tqdm import tqdm
 import numpy as np
 import torch
@@ -74,6 +77,56 @@ def load_legacy_qwen_config(model_name):
     return config
 
 
+LEGACY_QWEN_ROTARY_SHA256 = '85e083350498af430ef887489b5429fbaf3c8fe10fa7d0aa10541e1aafaf81fe'
+
+
+def restore_legacy_rotary_buffers(model, cache_length):
+    """Restore the reviewed custom Qwen rotary buffers after meta loading."""
+    config = model.config
+    rope_parameters = getattr(config, 'rope_parameters', None)
+    if (not isinstance(rope_parameters, dict) or rope_parameters.get('rope_type', 'default') != 'default' or
+            rope_parameters.get('rope_theta') != getattr(config, 'rope_theta', None)):
+        raise ValueError('unsupported rotary configuration')
+    if not isinstance(cache_length, int) or cache_length <= 0:
+        raise ValueError('invalid rotary cache length')
+    parameters = list(model.parameters())
+    if not parameters or any(p.device.type != 'cpu' or (p.is_floating_point() and p.dtype != torch.float32) for p in parameters):
+        raise ValueError('unsupported rotary model dtype')
+    rotary_modules = []
+    for module in model.modules():
+        nonpersistent = module._non_persistent_buffers_set
+        if not nonpersistent:
+            continue
+        if type(module).__name__ != 'Qwen2RotaryEmbedding' or nonpersistent != {'inv_freq', 'cos_cached', 'sin_cached'}:
+            raise ValueError('unsupported nonpersistent model buffers')
+        try:
+            source_hash = hashlib.sha256(inspect.getsource(type(module)).encode('utf-8')).hexdigest()
+        except (OSError, TypeError) as exc:
+            raise ValueError('unsupported rotary implementation') from exc
+        if source_hash != LEGACY_QWEN_ROTARY_SHA256:
+            raise ValueError('unsupported rotary implementation')
+        dim = module.dim
+        base = module.base
+        if (not isinstance(dim, int) or dim <= 0 or dim % 2 or
+                not isinstance(base, (int, float)) or not math.isfinite(base) or base <= 0 or
+                base != config.rope_theta or module.inv_freq.device.type != 'cpu' or
+                module.inv_freq.shape != (dim // 2,) or module.inv_freq.dtype != torch.float32 or
+                module.cos_cached.device.type != 'cpu' or module.sin_cached.device.type != 'cpu' or
+                module.cos_cached.dtype != torch.float32 or module.sin_cached.dtype != torch.float32 or
+                module.cos_cached.ndim != 2 or module.cos_cached.shape[1] != dim or
+                module.sin_cached.shape != module.cos_cached.shape or not callable(module._set_cos_sin_cache) or
+                not isinstance(module.max_position_embeddings, int) or module.max_position_embeddings <= 0):
+            raise ValueError('unsupported rotary buffer layout')
+        rotary_modules.append(module)
+    if not rotary_modules or len(rotary_modules) != getattr(config, 'num_hidden_layers', None):
+        raise ValueError('unsupported rotary layer count')
+    for module in rotary_modules:
+        device = module.inv_freq.device
+        inv_freq = 1.0 / (module.base ** (torch.arange(0, module.dim, 2, dtype=torch.int64, device=device).float() / module.dim))
+        module.register_buffer('inv_freq', inv_freq, persistent=False)
+        module._set_cos_sin_cache(seq_len=min(cache_length, module.max_position_embeddings), device=device, dtype=module.cos_cached.dtype)
+
+
 class DenseRetrievalMaster:
     def __init__(self, args, gpu_id):
         self.args = args
@@ -94,7 +147,9 @@ class DenseRetrievalMaster:
             vector_dim = 1024
             vector_linear_directory = f"2_Dense_{vector_dim}"
             config = load_legacy_qwen_config(model_dir)
-            model = AutoModel.from_pretrained(model_dir, config=config, trust_remote_code=True).to(self.device)
+            model = AutoModel.from_pretrained(model_dir, config=config, trust_remote_code=True)
+            restore_legacy_rotary_buffers(model, 513)
+            model = model.to(self.device)
             model.eval()
             tokenizer = AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True)
             vector_linear = torch.nn.Linear(in_features=model.config.hidden_size, out_features=vector_dim).to(self.device)
@@ -110,7 +165,9 @@ class DenseRetrievalMaster:
         elif self.args.retriever == 'flat-gte':
             tokenizer = AutoTokenizer.from_pretrained('Alibaba-NLP/gte-Qwen2-7B-instruct', trust_remote_code=True)
             config = load_legacy_qwen_config('Alibaba-NLP/gte-Qwen2-7B-instruct')
-            model = AutoModel.from_pretrained('Alibaba-NLP/gte-Qwen2-7B-instruct', config=config, trust_remote_code=True).to(self.device)
+            model = AutoModel.from_pretrained('Alibaba-NLP/gte-Qwen2-7B-instruct', config=config, trust_remote_code=True)
+            restore_legacy_rotary_buffers(model, 8193)
+            model = model.to(self.device)
             model.eval()
             self.retriever_model = (tokenizer, model)
 
