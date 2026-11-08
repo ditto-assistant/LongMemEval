@@ -59,15 +59,34 @@ pip install -r requirements-lite.txt
 
 #### Full support
 
-If you also would like to run the memory systems introduced in the paper, please set up this environment instead. 
+The pinned full environment targets Linux x86-64 and Python 3.12. It upgrades
+vLLM and PyTorch beyond the original CUDA 12.1 environment; do not assume that
+the old drivers, GPU architectures, model-specific code, or benchmark scores
+are compatible. The upgraded GPU and model paths have not yet been validated.
+In particular, vLLM's current NVIDIA builds require compute capability 7.5 or
+newer; the original environment also supported older hardware. Consult the
+[vLLM GPU installation guide](https://docs.vllm.ai/en/v0.33.0/getting_started/installation/gpu/)
+for the matching GPU and driver requirements.
 
 ```
-conda create -n longmemeval python=3.9
+conda create -n longmemeval python=3.12
 conda activate longmemeval
-pip install torch==2.3.1 torchvision==0.18.1 torchaudio==2.3.1 --index-url https://download.pytorch.org/whl/cu121
 pip install -r requirements-full.txt
 ```
-We have tested this environment on a Linux machine with CUDA 12.1. If you use a different platform, you may need to modify the requirements.
+The resolved lock is generated from `requirements-full.in` with the `uv pip
+compile` command recorded at the top of `requirements-full.txt`. The old
+`flash-attn` and `vllm-flash-attn` pins are not included in this candidate;
+model-specific attention support must be validated before relying on it.
+The current Stella/GTE compatibility repair recognizes only the reviewed
+float32 custom Qwen rotary implementation; unrecognized local model revisions,
+scaled rotary configurations, and other dtypes fail rather than silently
+using uninitialized buffers. GPU and mixed-precision behavior remain untested.
+
+The vLLM helper scripts bind to `127.0.0.1` by default. Setting `VLLM_HOST` to
+a non-loopback address also requires `VLLM_API_KEY`; configure clients with
+the same key. vLLM's API key does not protect every endpoint, so remote access
+also requires network-level access controls. The included benchmark clients
+use a local, unauthenticated API and need configuration changes to use a key.
 
 ## 📜 Dataset Format
 
