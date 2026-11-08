@@ -1,6 +1,9 @@
 import functools
 import hashlib
 import inspect
+import json
+from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -76,6 +79,24 @@ class Qwen2RotaryEmbedding(torch.nn.Module):
 
 
 class RetrievalCompatibilityTest(unittest.TestCase):
+    def test_stella_tokenizer_respects_checkpoint_eos_setting(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(run_retrieval.AutoTokenizer, 'from_pretrained') as loader:
+            config_path = Path(directory) / 'tokenizer_config.json'
+            for value, expected in ((True, {'add_eos_token': True}),
+                                    (False, {'add_eos_token': False}),
+                                    (None, {})):
+                with self.subTest(value=value):
+                    config_path.write_text(json.dumps({} if value is None else {'add_eos_token': value}))
+                    run_retrieval.load_stella_tokenizer(directory)
+                    loader.assert_called_with(directory, trust_remote_code=True, **expected)
+            config_path.unlink()
+            run_retrieval.load_stella_tokenizer(directory)
+            loader.assert_called_with(directory, trust_remote_code=True)
+            config_path.write_text(json.dumps({'add_eos_token': 'true'}))
+            with self.assertRaisesRegex(ValueError, 'must be a boolean'):
+                run_retrieval.load_stella_tokenizer(directory)
+
     def test_legacy_rope_base_is_preserved(self):
         config = SimpleNamespace(rope_parameters={"rope_theta": 1000000.0})
         with patch.object(run_retrieval.AutoConfig, "from_pretrained", return_value=config):

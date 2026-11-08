@@ -25,6 +25,22 @@ client = OpenAI(
 )
 
 
+def load_stella_tokenizer(model_dir):
+    # Transformers 5 can discard this setting from the checkpoint's
+    # tokenizer config, silently changing Stella's embeddings.
+    options = {}
+    config_path = os.path.join(model_dir, 'tokenizer_config.json')
+    if os.path.isfile(config_path):
+        with open(config_path, encoding='utf-8') as config_file:
+            config = json.load(config_file)
+        if 'add_eos_token' in config:
+            add_eos_token = config['add_eos_token']
+            if not isinstance(add_eos_token, bool):
+                raise ValueError('Stella tokenizer add_eos_token must be a boolean')
+            options['add_eos_token'] = add_eos_token
+    return AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True, **options)
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--in_file', type=str, required=True)
@@ -163,7 +179,7 @@ class DenseRetrievalMaster:
             restore_legacy_rotary_buffers(model, 513)
             model = model.to(self.device)
             model.eval()
-            tokenizer = AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True)
+            tokenizer = load_stella_tokenizer(model_dir)
             vector_linear = torch.nn.Linear(in_features=model.config.hidden_size, out_features=vector_dim).to(self.device)
             vector_linear_dict = {
                 k.replace("linear.", ""): v for k, v in
