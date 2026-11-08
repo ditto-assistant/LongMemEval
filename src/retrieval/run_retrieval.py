@@ -14,6 +14,8 @@ import argparse
 from rank_bm25 import BM25Okapi
 from openai import OpenAI
 from transformers import AutoConfig, AutoModel, AutoTokenizer
+from transformers.models.auto.tokenization_auto import get_tokenizer_config
+from transformers.utils.hub import resolve_revision
 from sklearn.preprocessing import normalize
 from src.retrieval.eval_utils import evaluate_retrieval, evaluate_retrieval_turn2session
 from src.retrieval.index_expansion_utils import fetch_expansion_from_cache, resolve_expansion
@@ -25,20 +27,18 @@ client = OpenAI(
 )
 
 
-def load_stella_tokenizer(model_dir):
+def load_legacy_qwen_tokenizer(model_source):
     # Transformers 5 can discard this setting from the checkpoint's
-    # tokenizer config, silently changing Stella's embeddings.
+    # tokenizer config, silently changing Stella and GTE embeddings.
+    revision = resolve_revision(model_source)
+    config = get_tokenizer_config(model_source, revision=revision)
     options = {}
-    config_path = os.path.join(model_dir, 'tokenizer_config.json')
-    if os.path.isfile(config_path):
-        with open(config_path, encoding='utf-8') as config_file:
-            config = json.load(config_file)
-        if 'add_eos_token' in config:
-            add_eos_token = config['add_eos_token']
-            if not isinstance(add_eos_token, bool):
-                raise ValueError('Stella tokenizer add_eos_token must be a boolean')
-            options['add_eos_token'] = add_eos_token
-    return AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True, **options)
+    if 'add_eos_token' in config:
+        add_eos_token = config['add_eos_token']
+        if not isinstance(add_eos_token, bool):
+            raise ValueError('tokenizer add_eos_token must be a boolean')
+        options['add_eos_token'] = add_eos_token
+    return AutoTokenizer.from_pretrained(model_source, trust_remote_code=True, revision=revision, **options)
 
 
 def parse_args():
@@ -179,7 +179,7 @@ class DenseRetrievalMaster:
             restore_legacy_rotary_buffers(model, 513)
             model = model.to(self.device)
             model.eval()
-            tokenizer = load_stella_tokenizer(model_dir)
+            tokenizer = load_legacy_qwen_tokenizer(model_dir)
             vector_linear = torch.nn.Linear(in_features=model.config.hidden_size, out_features=vector_dim).to(self.device)
             vector_linear_dict = {
                 k.replace("linear.", ""): v for k, v in
@@ -191,7 +191,7 @@ class DenseRetrievalMaster:
             self.retriever_model = (tokenizer, model, vector_linear)
             
         elif self.args.retriever == 'flat-gte':
-            tokenizer = AutoTokenizer.from_pretrained('Alibaba-NLP/gte-Qwen2-7B-instruct', trust_remote_code=True)
+            tokenizer = load_legacy_qwen_tokenizer('Alibaba-NLP/gte-Qwen2-7B-instruct')
             config = load_legacy_qwen_config('Alibaba-NLP/gte-Qwen2-7B-instruct')
             model = AutoModel.from_pretrained('Alibaba-NLP/gte-Qwen2-7B-instruct', config=config, trust_remote_code=True)
             restore_legacy_rotary_buffers(model, 8193)

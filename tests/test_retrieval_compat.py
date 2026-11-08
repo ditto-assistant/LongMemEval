@@ -79,7 +79,7 @@ class Qwen2RotaryEmbedding(torch.nn.Module):
 
 
 class RetrievalCompatibilityTest(unittest.TestCase):
-    def test_stella_tokenizer_respects_checkpoint_eos_setting(self):
+    def test_legacy_qwen_tokenizer_respects_checkpoint_eos_setting(self):
         with tempfile.TemporaryDirectory() as directory, \
              patch.object(run_retrieval.AutoTokenizer, 'from_pretrained') as loader:
             config_path = Path(directory) / 'tokenizer_config.json'
@@ -88,14 +88,24 @@ class RetrievalCompatibilityTest(unittest.TestCase):
                                     (None, {})):
                 with self.subTest(value=value):
                     config_path.write_text(json.dumps({} if value is None else {'add_eos_token': value}))
-                    run_retrieval.load_stella_tokenizer(directory)
-                    loader.assert_called_with(directory, trust_remote_code=True, **expected)
+                    run_retrieval.load_legacy_qwen_tokenizer(directory)
+                    loader.assert_called_with(directory, trust_remote_code=True, revision=None, **expected)
             config_path.unlink()
-            run_retrieval.load_stella_tokenizer(directory)
-            loader.assert_called_with(directory, trust_remote_code=True)
+            run_retrieval.load_legacy_qwen_tokenizer(directory)
+            loader.assert_called_with(directory, trust_remote_code=True, revision=None)
             config_path.write_text(json.dumps({'add_eos_token': 'true'}))
             with self.assertRaisesRegex(ValueError, 'must be a boolean'):
-                run_retrieval.load_stella_tokenizer(directory)
+                run_retrieval.load_legacy_qwen_tokenizer(directory)
+
+    def test_remote_tokenizer_uses_same_resolved_revision(self):
+        source = 'example/model'
+        revision = '0123456789abcdef0123456789abcdef01234567'
+        with patch.object(run_retrieval, 'resolve_revision', return_value=revision), \
+             patch.object(run_retrieval, 'get_tokenizer_config', return_value={'add_eos_token': True}) as config, \
+             patch.object(run_retrieval.AutoTokenizer, 'from_pretrained') as loader:
+            run_retrieval.load_legacy_qwen_tokenizer(source)
+        config.assert_called_once_with(source, revision=revision)
+        loader.assert_called_once_with(source, revision=revision, trust_remote_code=True, add_eos_token=True)
 
     def test_legacy_rope_base_is_preserved(self):
         config = SimpleNamespace(rope_parameters={"rope_theta": 1000000.0})
@@ -120,12 +130,14 @@ class RetrievalCompatibilityTest(unittest.TestCase):
                 master.device = torch.device("cpu")
                 state = {"linear.weight": torch.zeros(1024, 2), "linear.bias": torch.zeros(1024)}
                 with patch.object(run_retrieval.AutoConfig, "from_pretrained", return_value=config), \
-                     patch.object(run_retrieval.AutoTokenizer, "from_pretrained", return_value=FakeTokenizer()), \
+                     patch.object(run_retrieval, "load_legacy_qwen_tokenizer", return_value=FakeTokenizer()) as tokenizer_loader, \
                      patch.object(run_retrieval.AutoModel, "from_pretrained", return_value=LoadableModel()) as loader, \
                      patch.object(run_retrieval, "restore_legacy_rotary_buffers") as restore, \
                      patch.object(torch, "load", return_value=state) as load:
                     master.prepare_retriever()
                 self.assertIs(loader.call_args.kwargs["config"], config)
+                self.assertEqual(tokenizer_loader.call_count, 1)
+                self.assertEqual(tokenizer_loader.call_args.args[0], "/synthetic/dunzhang_stella_en_1.5B_v5" if retriever == "flat-stella" else "Alibaba-NLP/gte-Qwen2-7B-instruct")
                 self.assertEqual(config.rope_theta, 1000000.0)
                 restore.assert_called_once_with(loader.return_value, 513 if retriever == "flat-stella" else 8193)
                 if retriever == "flat-stella":
